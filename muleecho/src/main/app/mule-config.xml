@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns:spring="http://www.springframework.org/schema/beans" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:mongo="http://www.mulesoft.org/schema/mule/mongo" xmlns:amqp="http://www.mulesoft.org/schema/mule/amqp"
+    xmlns:vm="http://www.mulesoft.org/schema/mule/vm" xmlns:http="http://www.mulesoft.org/schema/mule/http"
+    xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+    xmlns:test="http://www.mulesoft.org/schema/mule/test"
+    xsi:schemaLocation="http://www.mulesoft.org/schema/mule/mongo http://www.mulesoft.org/schema/mule/mongo/2.0/mule-mongo.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/amqp http://www.mulesoft.org/schema/mule/amqp/3.3/mule-amqp.xsd
+http://www.mulesoft.org/schema/mule/vm http://www.mulesoft.org/schema/mule/vm/current/mule-vm.xsd
+http://www.mulesoft.org/schema/mule/test http://www.mulesoft.org/schema/mule/test/current/mule-test.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd
+http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd" version="EE-3.4.0">
+
+    <mongo:config name="mongo" database="mule" doc:name="Mongo DB"/>
+
+    <amqp:connector name="amqpConnector" virtualHost="mule-test"
+        username="mule" password="elum" />
+
+    <http:connector name="NotToBeConfusedWithTheOtherHttpConnector" doc:name="HTTP\HTTPS"/>
+    <http:polling-connector name="PollingHttpConnector"
+        pollingFrequency="60000" reuseAddress="true" doc:name="HTTP Polling"/>
+
+    <amqp:endpoint exchangeName="fanoutEx" queueDurable="false"
+        queueExclusive="true" exchangeType="fanout" name="amqp_endpoint"
+        queueName="" responseTimeout="10000" doc:name="AMQP"
+        exchangeDurable="false" />
+
+    <flow name="Http_Message" doc:name="Http_Message" doc:description="This use-case simply puts a message in the AMQP based exchange.">
+        <http:inbound-endpoint exchange-pattern="request-response"
+            connector-ref="NotToBeConfusedWithTheOtherHttpConnector"
+            host="localhost" port="8090" doc:name="HTTP" path="message" />
+        <amqp:outbound-endpoint responseTimeout="10000"
+            doc:name="Send Message" connector-ref="amqpConnector" ref="amqp_endpoint" />
+        <logger message="Message sent" level="INFO" doc:name="Logger" />
+    </flow>
+    <flow name="Amqp_Message_Processor" doc:name="Amqp_Message_Processor" doc:description="This flow simply picks up a message from the AMQP based exchange and logs it">
+        <amqp:inbound-endpoint responseTimeout="10000"
+            doc:name="Recive Message" connector-ref="amqpConnector" ref="amqp_endpoint" />
+        <byte-array-to-string-transformer
+            doc:name="Transform bytearray message to String" />
+        <mongo:insert-object-from-map collection="things" config-ref="" doc:name="Mongo DB">
+            <mongo:element-attributes>
+                <mongo:element-attribute key="id"
+                    value-ref="#[json:id]" />
+                <mongo:element-attribute key="description"
+                    value-ref="#[json:data/rss]" />
+                <mongo:element-attribute key="data"
+                    value-ref="#[json:data]" />
+            </mongo:element-attributes>
+        </mongo:insert-object-from-map>
+
+        <logger
+            message="Recived message id: #[json:id]; rss: #[json:data/rss]; full: #[payload]"
+            level="INFO" doc:name="Logger" />
+    </flow>
+    <flow name="Polling_Message" doc:name="Polling_Message" doc:description="This flow polls a REST point every 60 seconds, then pushes the result to an AMQP endpoint">
+        <http:inbound-endpoint host="localhost"
+            port="3000" doc:name="HTTP" path="webService" connector-ref="PollingHttpConnector" />
+        <amqp:outbound-endpoint responseTimeout="10000"
+            doc:name="Send Message" connector-ref="amqpConnector" ref="amqp_endpoint" />
+        <logger message="Sent request and sent message: #[payload]"
+            level="INFO" doc:name="Logger" />
+    </flow>
+</mule>
